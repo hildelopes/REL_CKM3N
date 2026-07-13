@@ -60,7 +60,7 @@ SELECTION-SCREEN END OF BLOCK b1.
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
   PARAMETERS: p_curtp TYPE curtp   DEFAULT '10',   " 10=moeda empresa
               p_prtyp TYPE c LENGTH 1 DEFAULT 'V', " V=periódico S=standard
-              p_elehk TYPE tckh1-elehk DEFAULT '01', " esquema de elementos
+              p_elehk TYPE tckh1-elehk,            " esquema (vazio=autom.)
               p_zeros AS CHECKBOX DEFAULT abap_false. " exibir elem. zerados
 SELECTION-SCREEN END OF BLOCK b2.
 
@@ -79,12 +79,15 @@ CLASS lcl_report DEFINITION FINAL.
     DATA: mt_mat    TYPE STANDARD TABLE OF ty_mat,
           mt_out    TYPE STANDARD TABLE OF ty_out,
           mt_prkeph TYPE mlccs_t_prkeph,
+          mt_prkeko TYPE mlccs_t_prkeko,
           mt_txele  TYPE HASHED TABLE OF tckh1
                          WITH UNIQUE KEY elehk elemt,
+          mv_elehk  TYPE tckh1-elehk,
           mv_waers  TYPE waers.
 
     METHODS: seleciona_materiais,
              le_split_ml,
+             carrega_textos,
              monta_saida,
              exibe_alv.
 ENDCLASS.
@@ -99,6 +102,7 @@ CLASS lcl_report IMPLEMENTATION.
       RETURN.
     ENDIF.
     le_split_ml( ).
+    carrega_textos( ).
     monta_saida( ).
     IF mt_out IS INITIAL.
       MESSAGE 'Sem split de custo (CKMLKEPH) para o período/tipo de preço'(m02)
@@ -131,12 +135,6 @@ CLASS lcl_report IMPLEMENTATION.
       WHERE w~werks = @p_werks
       INTO @mv_waers.
 
-    " Textos dos elementos de custo do esquema
-    SELECT * FROM tckh1
-      WHERE spras = @sy-langu
-        AND elehk = @p_elehk
-      INTO TABLE @mt_txele.
-
   ENDMETHOD.
 
   METHOD le_split_ml.
@@ -161,6 +159,7 @@ CLASS lcl_report IMPLEMENTATION.
         i_poper_1    = p_poper
         i_untper     = '000'
       IMPORTING
+        et_prkeko    = mt_prkeko
         et_prkeph    = mt_prkeph
       TABLES
         it_kalnr     = lt_kalnr
@@ -170,7 +169,40 @@ CLASS lcl_report IMPLEMENTATION.
         OTHERS                  = 3.
 
     IF sy-subrc <> 0.
-      CLEAR mt_prkeph.
+      CLEAR: mt_prkeko, mt_prkeph.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD carrega_textos.
+
+    " Esquema de elementos: o informado na tela ou, se vazio,
+    " determinado automaticamente do cabeçalho do split (PRKEKO)
+    mv_elehk = p_elehk.
+    IF mv_elehk IS INITIAL.
+      READ TABLE mt_prkeko ASSIGNING FIELD-SYMBOL(<ls_keko>)
+           WITH KEY keart = 'H'.
+      IF sy-subrc = 0.
+        mv_elehk = <ls_keko>-elehk.
+      ENDIF.
+    ENDIF.
+
+    " Textos no idioma de logon
+    SELECT * FROM tckh1
+      WHERE spras = @sy-langu
+        AND elehk = @mv_elehk
+      INTO TABLE @mt_txele.
+
+    " Fallback: textos em qualquer idioma disponível
+    IF mt_txele IS INITIAL.
+      SELECT * FROM tckh1
+        WHERE elehk = @mv_elehk
+        INTO TABLE @DATA(lt_txele).
+      SORT lt_txele BY elemt spras.
+      DELETE ADJACENT DUPLICATES FROM lt_txele COMPARING elemt.
+      LOOP AT lt_txele ASSIGNING FIELD-SYMBOL(<ls_txt>).
+        INSERT <ls_txt> INTO TABLE mt_txele.
+      ENDLOOP.
     ENDIF.
 
   ENDMETHOD.
@@ -242,7 +274,7 @@ CLASS lcl_report IMPLEMENTATION.
 
         " Suprime elementos sem texto no esquema E sem valor
         READ TABLE mt_txele ASSIGNING FIELD-SYMBOL(<ls_txt>)
-             WITH TABLE KEY elehk = p_elehk
+             WITH TABLE KEY elehk = mv_elehk
                             elemt = ls_out-elemt.
         IF sy-subrc = 0.
           ls_out-txele = <ls_txt>-txele.
@@ -296,6 +328,7 @@ CLASS lcl_report IMPLEMENTATION.
         lo_col->set_medium_text( 'Elemento' ).
 
         lo_col = lo_cols->get_column( 'TXELE' ).
+        lo_col->set_short_text( 'Denom.' ).
         lo_col->set_medium_text( 'Denom.elemento' ).
         lo_col->set_long_text( 'Denominação elemento custo' ).
 
@@ -306,11 +339,17 @@ CLASS lcl_report IMPLEMENTATION.
         ENDLOOP.
 
         lo_col = lo_cols->get_column( 'TOTAL' ).
+        lo_col->set_short_text( 'Total' ).
         lo_col->set_medium_text( 'Total' ).
+        lo_col->set_long_text( 'Total' ).
         lo_col = lo_cols->get_column( 'FIXO' ).
+        lo_col->set_short_text( 'Fixo' ).
         lo_col->set_medium_text( 'Fixo' ).
+        lo_col->set_long_text( 'Fixo' ).
         lo_col = lo_cols->get_column( 'VARIA' ).
+        lo_col->set_short_text( 'Variável' ).
         lo_col->set_medium_text( 'Variável' ).
+        lo_col->set_long_text( 'Variável' ).
 
         " Ordenação com subtotal por material
         DATA(lo_sorts) = lo_salv->get_sorts( ).

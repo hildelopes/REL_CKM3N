@@ -17,7 +17,9 @@ em massa (multi-material / multi-lote), em ALV (`CL_SALV_TABLE`).
 - Centro (obrigatório), range de materiais e tipo de avaliação
 - Período/ano (default = mês corrente)
 - Tipo de moeda (`10` = moeda da empresa), tipo de preço (`V` periódico / `S` standard)
-- Esquema de elementos (`P_ELEHK`, default `01` — confirmar na OKTZ)
+- Esquema de elementos (`P_ELEHK`) — se vazio, é determinado automaticamente
+  a partir do cabeçalho do split (`ET_PRKEKO`); os textos vêm da `TCKH1`
+  no idioma de logon, com fallback para qualquer idioma
 - Checkbox para exibir elementos zerados
 
 ## Saída
