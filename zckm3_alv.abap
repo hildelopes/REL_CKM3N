@@ -5,7 +5,7 @@
 *& multi-material / multi-lote, a partir do split de preço do
 *& Material Ledger.
 *&
-*& Fonte de dados : MLCCS_READ_PR (resolve CKMLKEPH / CKMLPRKEKO)
+*& Fonte de dados : MLCCS_READ_PR (lê CKMLKEPH via IT_KALNR/ET_PRKEPH)
 *& Textos         : TCKH1 (textos dos elementos do esquema ELEHK)
 *& Preço/unidade  : CKMLCR (PEINH / preços por tipo de moeda)
 *& Materiais      : CKMLHD + MARA + MAKT
@@ -78,7 +78,7 @@ CLASS lcl_report DEFINITION FINAL.
   PRIVATE SECTION.
     DATA: mt_mat    TYPE STANDARD TABLE OF ty_mat,
           mt_out    TYPE STANDARD TABLE OF ty_out,
-          mt_prkeph TYPE STANDARD TABLE OF ckmlprkeph,
+          mt_prkeph TYPE mlccs_t_prkeph,
           mt_txele  TYPE HASHED TABLE OF tckh1
                          WITH UNIQUE KEY elehk elemt,
           mv_waers  TYPE waers.
@@ -141,31 +141,33 @@ CLASS lcl_report IMPLEMENTATION.
 
   METHOD le_split_ml.
 
-    DATA: lt_inkeph TYPE STANDARD TABLE OF ckmlprkeph,
-          lt_prkeko TYPE STANDARD TABLE OF ckmlprkeko.
+    DATA: lt_kalnr TYPE ckmv0_matobj_tbl.
 
-    " Chaves de leitura: 1 entrada por número de cálculo/período
+    " Objetos de custeio: 1 entrada por número de cálculo/área avaliação
     LOOP AT mt_mat ASSIGNING FIELD-SYMBOL(<ls_mat>).
-      APPEND INITIAL LINE TO lt_inkeph ASSIGNING FIELD-SYMBOL(<ls_key>).
-      <ls_key>-kalnr  = <ls_mat>-kalnr.
-      <ls_key>-bdatj  = p_bdatj.
-      <ls_key>-poper  = p_poper.
-      <ls_key>-untper = '000'.
-      <ls_key>-curtp  = p_curtp.
+      APPEND INITIAL LINE TO lt_kalnr ASSIGNING FIELD-SYMBOL(<ls_key>).
+      <ls_key>-kalnr = <ls_mat>-kalnr.
+      <ls_key>-bwkey = <ls_mat>-bwkey.
     ENDLOOP.
 
-    " Leitura oficial do split de preço do Material Ledger.
-    " Retorna as linhas de CKMLKEPH já resolvidas (total e parte fixa).
+    " Leitura oficial do split de preço do Material Ledger (CKMLKEPH).
+    " Retorna todas as linhas do período: tipos de preço, moedas,
+    " split principal/auxiliar, totais e parte fixa — o filtro é
+    " feito na montagem da saída.
     CALL FUNCTION 'MLCCS_READ_PR'
       EXPORTING
-        i_use_buffer    = abap_false
+        i_use_buffer = space
+        i_bdatj_1    = p_bdatj
+        i_poper_1    = p_poper
+        i_untper     = '000'
+      IMPORTING
+        et_prkeph    = mt_prkeph
       TABLES
-        it_inkeph       = lt_inkeph
-        ot_prkeko       = lt_prkeko
-        ot_prkeph       = mt_prkeph
+        it_kalnr     = lt_kalnr
       EXCEPTIONS
-        no_prices_found = 1
-        OTHERS          = 2.
+        no_data_found           = 1
+        input_data_inconsistent = 2
+        OTHERS                  = 3.
 
     IF sy-subrc <> 0.
       CLEAR mt_prkeph.
@@ -195,15 +197,19 @@ CLASS lcl_report IMPLEMENTATION.
     LOOP AT mt_mat ASSIGNING FIELD-SYMBOL(<ls_mat>).
 
       " Linha de totais (KKZST = ' ') e de custos fixos (KKZST = 'X')
-      " do tipo de preço solicitado
+      " do tipo de preço/moeda solicitados, split principal (KEART = 'H')
       READ TABLE mt_prkeph ASSIGNING FIELD-SYMBOL(<ls_tot>)
            WITH KEY kalnr = <ls_mat>-kalnr
+                    curtp = p_curtp
+                    keart = 'H'
                     prtyp = p_prtyp
                     kkzst = space.
       CHECK sy-subrc = 0.
 
       READ TABLE mt_prkeph ASSIGNING FIELD-SYMBOL(<ls_fix>)
            WITH KEY kalnr = <ls_mat>-kalnr
+                    curtp = p_curtp
+                    keart = 'H'
                     prtyp = p_prtyp
                     kkzst = 'X'.
       DATA(lv_tem_fixo) = xsdbool( sy-subrc = 0 ).

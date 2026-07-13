@@ -8,7 +8,7 @@ em massa (multi-material / multi-lote), em ALV (`CL_SALV_TABLE`).
 | Origem | Uso |
 |---|---|
 | `CKMLHD` + `MARA` + `MAKT` | Materiais do centro com nº de cálculo (KALNR) |
-| `MLCCS_READ_PR` | Split de preço do ML (resolve `CKMLKEPH`/`CKMLPRKEKO`) |
+| `MLCCS_READ_PR` | Split de preço do ML (lê `CKMLKEPH`; entrada `IT_KALNR`, saída `ET_PRKEPH`) |
 | `CKMLCR` | Unidade de preço (PEINH) por período/moeda |
 | `TCKH1` | Textos dos elementos de custo do esquema (`ELEHK`) |
 
@@ -28,9 +28,12 @@ Valores por unidade de preço (PEINH), mesmo referencial da CKM3N.
 
 ## Pontos de atenção na instalação
 
-- As tabelas do FM (`IT_INKEPH`/`OT_PRKEPH`) estão tipadas como
-  `CKMLPRKEPH`/`CKMLPRKEKO`; se a release usar `MLINKEPH`/`MLPRKEPH`,
-  basta trocar a tipagem — a lógica não muda.
+- A chamada do `MLCCS_READ_PR` usa a interface `IT_KALNR` (tipo
+  `CKMV0_MATOBJ_TBL`) + `I_BDATJ_1`/`I_POPER_1`, com retorno em
+  `ET_PRKEPH` (tipo `MLCCS_T_PRKEPH`) — assinatura padrão do ECC.
+- Na saída do FM, o filtro usado é: `KEART = 'H'` (split principal),
+  `KKZST = ' '` (totais) / `'X'` (parte fixa), mais tipo de preço e
+  tipo de moeda da tela de seleção.
 - A moeda é derivada de `T001` (correto para CURTP 10); para 30/31/32
   ajustar a determinação.
 - Textos de seleção (`TEXT-001`, `TEXT-002`) devem ser mantidos nos
