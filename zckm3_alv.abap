@@ -177,14 +177,15 @@ CLASS lcl_report IMPLEMENTATION.
   METHOD carrega_textos.
 
     " Esquema de elementos: o informado na tela ou, se vazio,
-    " determinado automaticamente do cabeçalho do split (PRKEKO)
+    " determinado automaticamente do cabeçalho do split (CKMLPRKEKO,
+    " campo ELEHK = esquema principal; ELEHKNS = secundário)
     mv_elehk = p_elehk.
     IF mv_elehk IS INITIAL.
-      READ TABLE mt_prkeko ASSIGNING FIELD-SYMBOL(<ls_keko>)
-           WITH KEY keart = 'H'.
-      IF sy-subrc = 0.
+      LOOP AT mt_prkeko ASSIGNING FIELD-SYMBOL(<ls_keko>)
+           WHERE elehk IS NOT INITIAL.
         mv_elehk = <ls_keko>-elehk.
-      ENDIF.
+        EXIT.
+      ENDLOOP.
     ENDIF.
 
     " Textos no idioma de logon
