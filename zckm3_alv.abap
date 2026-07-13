@@ -60,7 +60,7 @@ SELECTION-SCREEN END OF BLOCK b1.
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
   PARAMETERS: p_curtp TYPE curtp   DEFAULT '10',   " 10=moeda empresa
               p_prtyp TYPE c LENGTH 1 DEFAULT 'V', " V=periódico S=standard
-              p_elehk TYPE elehk   DEFAULT '01',   " esquema de elementos
+              p_elehk TYPE tckh1-elehk DEFAULT '01', " esquema de elementos
               p_zeros AS CHECKBOX DEFAULT abap_false. " exibir elem. zerados
 SELECTION-SCREEN END OF BLOCK b2.
 
