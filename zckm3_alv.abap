@@ -233,6 +233,7 @@ CLASS lcl_report IMPLEMENTATION.
     TYPES ty_cand_tab TYPE STANDARD TABLE OF ty_cand WITH EMPTY KEY.
 
     DATA(lt_cand) = VALUE ty_cand_tab(
+      ( tot = 'EL_HV'   fix = 'EL_HF'   )
       ( tot = 'FELDNRV' fix = 'FELDNRF' )
       ( tot = 'FDNRV'   fix = 'FDNRF'   )
       ( tot = 'FELDNR'  fix = 'FELDNRF' ) ).
