@@ -34,8 +34,13 @@ Valores por unidade de preço (PEINH), mesmo referencial da CKM3N.
   `CKMV0_MATOBJ_TBL`) + `I_BDATJ_1`/`I_POPER_1`, com retorno em
   `ET_PRKEPH` (tipo `MLCCS_T_PRKEPH`) — assinatura padrão do ECC.
 - Na saída do FM, o filtro usado é: `KEART = 'H'` (split principal),
-  `KKZST = ' '` (totais) / `'X'` (parte fixa), mais tipo de preço e
-  tipo de moeda da tela de seleção.
+  `KKZST = ' '`, mais tipo de preço e tipo de moeda da tela de seleção.
+- Os campos `KST001..KST040` NÃO são 1:1 com o nº do elemento: cada
+  elemento tem um campo de custo para os custos totais e outro para a
+  parte fixa (não necessariamente adjacentes). O mapeamento é lido da
+  `TCKH3` (descoberta dinâmica do nome dos campos de nº de campo de
+  custo, ex. `FELDNRV`/`FELDNRF`). Sem mapeamento, o report cai em modo
+  1:1 e emite mensagem informativa com os campos reais da `TCKH3`.
 - A moeda é derivada de `T001` (correto para CURTP 10); para 30/31/32
   ajustar a determinação.
 - Textos de seleção (`TEXT-001`, `TEXT-002`) devem ser mantidos nos

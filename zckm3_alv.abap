@@ -32,6 +32,14 @@ TYPES: BEGIN OF ty_mat,
          meins TYPE meins,
        END OF ty_mat.
 
+" Mapeamento elemento de custo -> campos KSTnnn (custos totais / fixos)
+TYPES: BEGIN OF ty_map,
+         elemt TYPE tckh1-elemt,
+         fdnrv TYPE n LENGTH 2,   " nº campo de custo: custos totais
+         fdnrf TYPE n LENGTH 2,   " nº campo de custo: parte fixa
+       END OF ty_map.
+TYPES ty_map_tab TYPE STANDARD TABLE OF ty_map WITH EMPTY KEY.
+
 TYPES: BEGIN OF ty_out,
          matnr TYPE matnr,
          maktx TYPE maktx,
@@ -82,12 +90,14 @@ CLASS lcl_report DEFINITION FINAL.
           mt_prkeko TYPE mlccs_t_prkeko,
           mt_txele  TYPE HASHED TABLE OF tckh1
                          WITH UNIQUE KEY elehk elemt,
+          mt_map    TYPE ty_map_tab,
           mv_elehk  TYPE tckh1-elehk,
           mv_waers  TYPE waers.
 
     METHODS: seleciona_materiais,
              le_split_ml,
              carrega_textos,
+             carrega_mapa,
              monta_saida,
              exibe_alv.
 ENDCLASS.
@@ -103,6 +113,7 @@ CLASS lcl_report IMPLEMENTATION.
     ENDIF.
     le_split_ml( ).
     carrega_textos( ).
+    carrega_mapa( ).
     monta_saida( ).
     IF mt_out IS INITIAL.
       MESSAGE 'Sem split de custo (CKMLKEPH) para o período/tipo de preço'(m02)
@@ -208,12 +219,99 @@ CLASS lcl_report IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD carrega_mapa.
+
+    " Cada elemento do esquema possui campos de custo (KSTnnn)
+    " próprios para custos totais e parte fixa, não necessariamente
+    " adjacentes. A atribuição fica na TCKH3; o nome dos campos com
+    " o nº do campo de custo varia por release, por isso a descoberta
+    " é dinâmica.
+    TYPES: BEGIN OF ty_cand,
+             tot TYPE fieldname,
+             fix TYPE fieldname,
+           END OF ty_cand.
+    TYPES ty_cand_tab TYPE STANDARD TABLE OF ty_cand WITH EMPTY KEY.
+
+    DATA(lt_cand) = VALUE ty_cand_tab(
+      ( tot = 'FELDNRV' fix = 'FELDNRF' )
+      ( tot = 'FDNRV'   fix = 'FDNRF'   )
+      ( tot = 'FELDNR'  fix = 'FELDNRF' ) ).
+
+    DATA: lv_tot TYPE fieldname,
+          lv_fix TYPE fieldname.
+
+    FIELD-SYMBOLS <lv_val> TYPE any.
+
+    SELECT * FROM tckh3
+      WHERE elehk = @mv_elehk
+      INTO TABLE @DATA(lt_tckh3).
+    IF lt_tckh3 IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    READ TABLE lt_tckh3 ASSIGNING FIELD-SYMBOL(<ls_h3>) INDEX 1.
+
+    LOOP AT lt_cand INTO DATA(ls_cand).
+      ASSIGN COMPONENT ls_cand-tot OF STRUCTURE <ls_h3>
+        TO FIELD-SYMBOL(<lv_chk1>).
+      CHECK sy-subrc = 0.
+      ASSIGN COMPONENT ls_cand-fix OF STRUCTURE <ls_h3>
+        TO FIELD-SYMBOL(<lv_chk2>).
+      CHECK sy-subrc = 0.
+      lv_tot = ls_cand-tot.
+      lv_fix = ls_cand-fix.
+      EXIT.
+    ENDLOOP.
+
+    IF lv_tot IS INITIAL.
+      " Diagnóstico: informa os campos reais da TCKH3 para ajuste
+      DATA(lo_type) = CAST cl_abap_structdescr(
+                        cl_abap_typedescr=>describe_by_name( 'TCKH3' ) ).
+      DATA(lv_flds) = ``.
+      LOOP AT lo_type->components ASSIGNING FIELD-SYMBOL(<ls_comp>).
+        lv_flds = |{ lv_flds } { <ls_comp>-name }|.
+      ENDLOOP.
+      MESSAGE |Campos de custo não identificados na TCKH3:{ lv_flds }|
+        TYPE 'I'.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_tckh3 ASSIGNING <ls_h3>.
+      APPEND INITIAL LINE TO mt_map ASSIGNING FIELD-SYMBOL(<ls_map>).
+      ASSIGN COMPONENT 'ELEMT' OF STRUCTURE <ls_h3> TO <lv_val>.
+      IF sy-subrc = 0.
+        <ls_map>-elemt = <lv_val>.
+      ENDIF.
+      ASSIGN COMPONENT lv_tot OF STRUCTURE <ls_h3> TO <lv_val>.
+      IF sy-subrc = 0.
+        <ls_map>-fdnrv = <lv_val>.
+      ENDIF.
+      ASSIGN COMPONENT lv_fix OF STRUCTURE <ls_h3> TO <lv_val>.
+      IF sy-subrc = 0.
+        <ls_map>-fdnrf = <lv_val>.
+      ENDIF.
+    ENDLOOP.
+
+    DELETE mt_map WHERE fdnrv IS INITIAL.
+    SORT mt_map BY elemt.
+
+  ENDMETHOD.
+
   METHOD monta_saida.
 
     DATA: ls_out   TYPE ty_out,
-          lv_field TYPE fieldname.
+          lv_field TYPE fieldname,
+          lv_nr    TYPE i,
+          lt_map   TYPE ty_map_tab.
 
     FIELD-SYMBOLS: <lv_val> TYPE any.
+
+    " Sem mapeamento da TCKH3, exibe os campos KST 1:1 (modo degradado)
+    lt_map = mt_map.
+    IF lt_map IS INITIAL.
+      lt_map = VALUE #( FOR i = 1 WHILE i <= 40
+                        ( elemt = i fdnrv = i ) ).
+    ENDIF.
 
     " Preço unitário (PEINH) do período, por tipo de moeda
     SELECT kalnr, peinh
@@ -229,9 +327,11 @@ CLASS lcl_report IMPLEMENTATION.
 
     LOOP AT mt_mat ASSIGNING FIELD-SYMBOL(<ls_mat>).
 
-      " Linha de totais (KKZST = ' ') e de custos fixos (KKZST = 'X')
-      " do tipo de preço/moeda solicitados, split principal (KEART = 'H')
-      READ TABLE mt_prkeph ASSIGNING FIELD-SYMBOL(<ls_tot>)
+      " Linha do split (KKZST = ' ') do tipo de preço/moeda
+      " solicitados, estratificação principal (KEART = 'H').
+      " Custos totais e parte fixa ficam na MESMA linha, em campos
+      " de custo distintos por elemento (mapeados na TCKH3).
+      READ TABLE mt_prkeph ASSIGNING FIELD-SYMBOL(<ls_split>)
            WITH KEY kalnr = <ls_mat>-kalnr
                     curtp = p_curtp
                     keart = 'H'
@@ -239,33 +339,30 @@ CLASS lcl_report IMPLEMENTATION.
                     kkzst = space.
       CHECK sy-subrc = 0.
 
-      READ TABLE mt_prkeph ASSIGNING FIELD-SYMBOL(<ls_fix>)
-           WITH KEY kalnr = <ls_mat>-kalnr
-                    curtp = p_curtp
-                    keart = 'H'
-                    prtyp = p_prtyp
-                    kkzst = 'X'.
-      DATA(lv_tem_fixo) = xsdbool( sy-subrc = 0 ).
-
       READ TABLE lt_cr INTO DATA(ls_cr)
            WITH KEY kalnr = <ls_mat>-kalnr BINARY SEARCH.
       IF sy-subrc <> 0.
         CLEAR ls_cr.
       ENDIF.
 
-      " Percorre os 40 campos de elemento (KST001..KST040)
-      DO 40 TIMES.
+      LOOP AT lt_map ASSIGNING FIELD-SYMBOL(<ls_map>).
 
         CLEAR ls_out.
-        ls_out-elemt = sy-index.
-        lv_field = |KST{ sy-index WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
+        ls_out-elemt = <ls_map>-elemt.
 
-        ASSIGN COMPONENT lv_field OF STRUCTURE <ls_tot> TO <lv_val>.
+        " Custos totais do elemento
+        lv_nr = <ls_map>-fdnrv.
+        CHECK lv_nr BETWEEN 1 AND 40.
+        lv_field = |KST{ lv_nr WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
+        ASSIGN COMPONENT lv_field OF STRUCTURE <ls_split> TO <lv_val>.
         CHECK sy-subrc = 0.
         ls_out-total = <lv_val>.
 
-        IF lv_tem_fixo = abap_true.
-          ASSIGN COMPONENT lv_field OF STRUCTURE <ls_fix> TO <lv_val>.
+        " Parte fixa do elemento (campo de custo próprio)
+        lv_nr = <ls_map>-fdnrf.
+        IF lv_nr BETWEEN 1 AND 40.
+          lv_field = |KST{ lv_nr WIDTH = 3 PAD = '0' ALIGN = RIGHT }|.
+          ASSIGN COMPONENT lv_field OF STRUCTURE <ls_split> TO <lv_val>.
           IF sy-subrc = 0.
             ls_out-fixo = <lv_val>.
           ENDIF.
@@ -297,7 +394,7 @@ CLASS lcl_report IMPLEMENTATION.
 
         APPEND ls_out TO mt_out.
 
-      ENDDO.
+      ENDLOOP.
 
     ENDLOOP.
 
